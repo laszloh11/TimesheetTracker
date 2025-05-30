@@ -14,6 +14,8 @@ import {
   type TimeEntryWithProject,
   type ProjectWithAssignments
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -53,384 +55,366 @@ export interface IStorage {
   getTeamHours(managerId: number, startDate: string): Promise<number>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private projects: Map<number, Project>;
-  private timeEntries: Map<number, TimeEntry>;
-  private projectAssignments: Map<number, ProjectAssignment>;
-  private currentUserId: number;
-  private currentProjectId: number;
-  private currentTimeEntryId: number;
-  private currentAssignmentId: number;
-
-  constructor() {
-    this.users = new Map();
-    this.projects = new Map();
-    this.timeEntries = new Map();
-    this.projectAssignments = new Map();
-    this.currentUserId = 1;
-    this.currentProjectId = 1;
-    this.currentTimeEntryId = 1;
-    this.currentAssignmentId = 1;
-
-    // Initialize with sample data
-    this.initializeSampleData();
+export class DatabaseStorage implements IStorage {
+  async initializeDatabase() {
+    // Create sample data if database is empty
+    const existingUsers = await db.select().from(users).limit(1);
+    if (existingUsers.length === 0) {
+      await this.seedDatabase();
+    }
   }
 
-  private initializeSampleData() {
+  private async seedDatabase() {
     // Create users
-    const johnDoe: User = { id: 1, username: "john.doe", name: "John Doe", role: "employee" };
-    const janeSmith: User = { id: 2, username: "jane.smith", name: "Jane Smith", role: "manager" };
-    const adminUser: User = { id: 3, username: "admin", name: "Admin User", role: "admin" };
-    
-    this.users.set(1, johnDoe);
-    this.users.set(2, janeSmith);
-    this.users.set(3, adminUser);
-    this.currentUserId = 4;
+    const [johnDoe] = await db.insert(users).values({
+      username: "john.doe",
+      name: "John Doe",
+      role: "employee"
+    }).returning();
+
+    const [janeSmith] = await db.insert(users).values({
+      username: "jane.smith",
+      name: "Jane Smith",
+      role: "manager"
+    }).returning();
+
+    const [adminUser] = await db.insert(users).values({
+      username: "admin",
+      name: "Admin User",
+      role: "admin"
+    }).returning();
 
     // Create projects
-    const websiteProject: Project = {
-      id: 1,
+    const [websiteProject] = await db.insert(projects).values({
       name: "Website Redesign",
       description: "Complete redesign of company website",
       startDate: "2024-11-01",
       endDate: "2025-01-15",
       status: "active",
       isPriority: true,
-      managerId: 2
-    };
+      managerId: janeSmith.id
+    }).returning();
 
-    const mobileProject: Project = {
-      id: 2,
+    const [mobileProject] = await db.insert(projects).values({
       name: "Mobile App Development",
       description: "Native mobile application development",
       startDate: "2024-12-01",
       endDate: "2025-03-01",
       status: "pending",
       isPriority: false,
-      managerId: 2
-    };
+      managerId: janeSmith.id
+    }).returning();
 
-    const dbProject: Project = {
-      id: 3,
+    const [dbProject] = await db.insert(projects).values({
       name: "Database Migration",
       description: "Legacy database migration to cloud",
       startDate: "2024-10-01",
       endDate: "2024-12-15",
       status: "closed",
       isPriority: false,
-      managerId: 2
-    };
-
-    this.projects.set(1, websiteProject);
-    this.projects.set(2, mobileProject);
-    this.projects.set(3, dbProject);
-    this.currentProjectId = 4;
+      managerId: janeSmith.id
+    }).returning();
 
     // Assign users to projects
-    this.projectAssignments.set(1, { id: 1, userId: 1, projectId: 1 });
-    this.projectAssignments.set(2, { id: 2, userId: 1, projectId: 2 });
-    this.projectAssignments.set(3, { id: 3, userId: 1, projectId: 3 });
-    this.currentAssignmentId = 4;
+    await db.insert(projectAssignments).values([
+      { userId: johnDoe.id, projectId: websiteProject.id },
+      { userId: johnDoe.id, projectId: mobileProject.id },
+      { userId: johnDoe.id, projectId: dbProject.id }
+    ]);
 
     // Create sample time entries
-    const today = new Date();
-    const yesterday = new Date(today);
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const dayBefore = new Date(today);
+    const dayBefore = new Date();
     dayBefore.setDate(dayBefore.getDate() - 2);
 
-    const timeEntry1: TimeEntry = {
-      id: 1,
-      userId: 1,
-      projectId: 1,
-      date: today.toISOString().split('T')[0],
-      hours: "4.0",
-      description: "Frontend development work",
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    const timeEntry2: TimeEntry = {
-      id: 2,
-      userId: 1,
-      projectId: 2,
-      date: yesterday.toISOString().split('T')[0],
-      hours: "6.5",
-      description: "Mobile UI implementation",
-      createdAt: yesterday,
-      updatedAt: yesterday
-    };
-
-    const timeEntry3: TimeEntry = {
-      id: 3,
-      userId: 1,
-      projectId: 3,
-      date: dayBefore.toISOString().split('T')[0],
-      hours: "8.0",
-      description: "Database schema migration",
-      createdAt: dayBefore,
-      updatedAt: dayBefore
-    };
-
-    this.timeEntries.set(1, timeEntry1);
-    this.timeEntries.set(2, timeEntry2);
-    this.timeEntries.set(3, timeEntry3);
-    this.currentTimeEntryId = 4;
+    await db.insert(timeEntries).values([
+      {
+        userId: johnDoe.id,
+        projectId: websiteProject.id,
+        date: today,
+        hours: "4.0",
+        description: "Frontend development work"
+      },
+      {
+        userId: johnDoe.id,
+        projectId: mobileProject.id,
+        date: yesterday.toISOString().split('T')[0],
+        hours: "6.5",
+        description: "Mobile UI implementation"
+      },
+      {
+        userId: johnDoe.id,
+        projectId: dbProject.id,
+        date: dayBefore.toISOString().split('T')[0],
+        hours: "8.0",
+        description: "Database schema migration"
+      }
+    ]);
   }
 
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.username === username);
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
   async getAllUsers(): Promise<User[]> {
-    return Array.from(this.users.values());
+    return await db.select().from(users);
   }
 
   async getProject(id: number): Promise<Project | undefined> {
-    return this.projects.get(id);
+    const [project] = await db.select().from(projects).where(eq(projects.id, id));
+    return project || undefined;
   }
 
   async getProjectsForUser(userId: number): Promise<Project[]> {
-    const assignments = Array.from(this.projectAssignments.values())
-      .filter(assignment => assignment.userId === userId);
+    const userProjects = await db
+      .select({ project: projects })
+      .from(projects)
+      .innerJoin(projectAssignments, eq(projects.id, projectAssignments.projectId))
+      .where(eq(projectAssignments.userId, userId));
     
-    const projects: Project[] = [];
-    for (const assignment of assignments) {
-      const project = this.projects.get(assignment.projectId);
-      if (project) {
-        projects.push(project);
-      }
-    }
-    return projects;
+    return userProjects.map(row => row.project);
   }
 
   async getProjectsForManager(managerId: number): Promise<Project[]> {
-    return Array.from(this.projects.values())
-      .filter(project => project.managerId === managerId);
+    return await db.select().from(projects).where(eq(projects.managerId, managerId));
   }
 
   async getAllProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values());
+    return await db.select().from(projects);
   }
 
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const id = this.currentProjectId++;
-    const project: Project = { 
-      id,
-      name: insertProject.name,
-      description: insertProject.description || null,
-      startDate: insertProject.startDate,
-      endDate: insertProject.endDate,
-      status: insertProject.status,
-      isPriority: insertProject.isPriority ?? false,
-      managerId: insertProject.managerId || null
-    };
-    this.projects.set(id, project);
+    const [project] = await db.insert(projects).values(insertProject).returning();
     return project;
   }
 
   async updateProject(id: number, updateData: Partial<Project>): Promise<Project | undefined> {
-    const project = this.projects.get(id);
-    if (!project) return undefined;
-    
-    const updatedProject = { ...project, ...updateData };
-    this.projects.set(id, updatedProject);
-    return updatedProject;
+    const [project] = await db
+      .update(projects)
+      .set(updateData)
+      .where(eq(projects.id, id))
+      .returning();
+    return project || undefined;
   }
 
   async getTimeEntry(id: number): Promise<TimeEntry | undefined> {
-    return this.timeEntries.get(id);
+    const [entry] = await db.select().from(timeEntries).where(eq(timeEntries.id, id));
+    return entry || undefined;
   }
 
   async getTimeEntriesForUser(userId: number): Promise<TimeEntryWithProject[]> {
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => entry.userId === userId);
+    const entries = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        date: timeEntries.date,
+        hours: timeEntries.hours,
+        description: timeEntries.description,
+        createdAt: timeEntries.createdAt,
+        updatedAt: timeEntries.updatedAt,
+        project: projects
+      })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(eq(timeEntries.userId, userId))
+      .orderBy(sql`${timeEntries.date} DESC`);
     
-    const entriesWithProjects: TimeEntryWithProject[] = [];
-    for (const entry of entries) {
-      const project = this.projects.get(entry.projectId);
-      if (project) {
-        entriesWithProjects.push({ ...entry, project });
-      }
-    }
-    
-    return entriesWithProjects.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return entries;
   }
 
   async getTimeEntriesForProject(projectId: number): Promise<TimeEntryWithProject[]> {
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => entry.projectId === projectId);
+    const entries = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        date: timeEntries.date,
+        hours: timeEntries.hours,
+        description: timeEntries.description,
+        createdAt: timeEntries.createdAt,
+        updatedAt: timeEntries.updatedAt,
+        project: projects
+      })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(eq(timeEntries.projectId, projectId));
     
-    const entriesWithProjects: TimeEntryWithProject[] = [];
-    for (const entry of entries) {
-      const project = this.projects.get(entry.projectId);
-      if (project) {
-        entriesWithProjects.push({ ...entry, project });
-      }
-    }
-    
-    return entriesWithProjects;
+    return entries;
   }
 
   async getTimeEntriesForDate(userId: number, date: string): Promise<TimeEntryWithProject[]> {
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => entry.userId === userId && entry.date === date);
+    const entries = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        date: timeEntries.date,
+        hours: timeEntries.hours,
+        description: timeEntries.description,
+        createdAt: timeEntries.createdAt,
+        updatedAt: timeEntries.updatedAt,
+        project: projects
+      })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(and(eq(timeEntries.userId, userId), eq(timeEntries.date, date)));
     
-    const entriesWithProjects: TimeEntryWithProject[] = [];
-    for (const entry of entries) {
-      const project = this.projects.get(entry.projectId);
-      if (project) {
-        entriesWithProjects.push({ ...entry, project });
-      }
-    }
-    
-    return entriesWithProjects;
+    return entries;
   }
 
   async getTimeEntriesForWeek(userId: number, startDate: string): Promise<TimeEntryWithProject[]> {
-    const start = new Date(startDate);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
     
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => {
-        if (entry.userId !== userId) return false;
-        const entryDate = new Date(entry.date);
-        return entryDate >= start && entryDate <= end;
-      });
+    const entries = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        date: timeEntries.date,
+        hours: timeEntries.hours,
+        description: timeEntries.description,
+        createdAt: timeEntries.createdAt,
+        updatedAt: timeEntries.updatedAt,
+        project: projects
+      })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(and(
+        eq(timeEntries.userId, userId),
+        gte(timeEntries.date, startDate),
+        lte(timeEntries.date, endDate.toISOString().split('T')[0])
+      ));
     
-    const entriesWithProjects: TimeEntryWithProject[] = [];
-    for (const entry of entries) {
-      const project = this.projects.get(entry.projectId);
-      if (project) {
-        entriesWithProjects.push({ ...entry, project });
-      }
-    }
-    
-    return entriesWithProjects;
+    return entries;
   }
 
   async getTimeEntriesForMonth(userId: number, year: number, month: number): Promise<TimeEntryWithProject[]> {
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => {
-        if (entry.userId !== userId) return false;
-        const entryDate = new Date(entry.date);
-        return entryDate.getFullYear() === year && entryDate.getMonth() === month - 1;
-      });
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     
-    const entriesWithProjects: TimeEntryWithProject[] = [];
-    for (const entry of entries) {
-      const project = this.projects.get(entry.projectId);
-      if (project) {
-        entriesWithProjects.push({ ...entry, project });
-      }
-    }
+    const entries = await db
+      .select({
+        id: timeEntries.id,
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        date: timeEntries.date,
+        hours: timeEntries.hours,
+        description: timeEntries.description,
+        createdAt: timeEntries.createdAt,
+        updatedAt: timeEntries.updatedAt,
+        project: projects
+      })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(and(
+        eq(timeEntries.userId, userId),
+        gte(timeEntries.date, startDate),
+        lte(timeEntries.date, endDate)
+      ));
     
-    return entriesWithProjects;
+    return entries;
   }
 
   async createTimeEntry(insertTimeEntry: InsertTimeEntry): Promise<TimeEntry> {
-    const id = this.currentTimeEntryId++;
-    const now = new Date();
-    const timeEntry: TimeEntry = { 
-      id,
-      userId: insertTimeEntry.userId,
-      projectId: insertTimeEntry.projectId,
-      date: insertTimeEntry.date,
-      hours: insertTimeEntry.hours.toString(),
-      description: insertTimeEntry.description || null,
-      createdAt: now,
-      updatedAt: now
-    };
-    this.timeEntries.set(id, timeEntry);
-    return timeEntry;
+    const [entry] = await db.insert(timeEntries).values({
+      ...insertTimeEntry,
+      hours: insertTimeEntry.hours.toString()
+    }).returning();
+    return entry;
   }
 
   async updateTimeEntry(id: number, updateData: Partial<TimeEntry>): Promise<TimeEntry | undefined> {
-    const timeEntry = this.timeEntries.get(id);
-    if (!timeEntry) return undefined;
-    
-    const updatedEntry = { 
-      ...timeEntry, 
-      ...updateData, 
-      updatedAt: new Date() 
-    };
-    this.timeEntries.set(id, updatedEntry);
-    return updatedEntry;
+    const [entry] = await db
+      .update(timeEntries)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(timeEntries.id, id))
+      .returning();
+    return entry || undefined;
   }
 
   async deleteTimeEntry(id: number): Promise<boolean> {
-    return this.timeEntries.delete(id);
+    const result = await db.delete(timeEntries).where(eq(timeEntries.id, id));
+    return result.rowCount > 0;
   }
 
   async assignUserToProject(assignment: InsertProjectAssignment): Promise<ProjectAssignment> {
-    const id = this.currentAssignmentId++;
-    const projectAssignment: ProjectAssignment = { ...assignment, id };
-    this.projectAssignments.set(id, projectAssignment);
-    return projectAssignment;
+    const [result] = await db.insert(projectAssignments).values(assignment).returning();
+    return result;
   }
 
   async getUserProjectAssignments(userId: number): Promise<ProjectAssignment[]> {
-    return Array.from(this.projectAssignments.values())
-      .filter(assignment => assignment.userId === userId);
+    return await db.select().from(projectAssignments).where(eq(projectAssignments.userId, userId));
   }
 
   async getProjectAssignments(projectId: number): Promise<ProjectAssignment[]> {
-    return Array.from(this.projectAssignments.values())
-      .filter(assignment => assignment.projectId === projectId);
+    return await db.select().from(projectAssignments).where(eq(projectAssignments.projectId, projectId));
   }
 
   async removeUserFromProject(userId: number, projectId: number): Promise<boolean> {
-    const assignment = Array.from(this.projectAssignments.entries())
-      .find(([_, assignment]) => assignment.userId === userId && assignment.projectId === projectId);
-    
-    if (assignment) {
-      return this.projectAssignments.delete(assignment[0]);
-    }
-    return false;
+    const result = await db.delete(projectAssignments)
+      .where(and(
+        eq(projectAssignments.userId, userId),
+        eq(projectAssignments.projectId, projectId)
+      ));
+    return result.rowCount > 0;
   }
 
   async getDailyHours(userId: number, date: string): Promise<number> {
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => entry.userId === userId && entry.date === date);
+    const result = await db
+      .select({ total: sql<number>`SUM(CAST(${timeEntries.hours} AS DECIMAL))` })
+      .from(timeEntries)
+      .where(and(eq(timeEntries.userId, userId), eq(timeEntries.date, date)));
     
-    return entries.reduce((total, entry) => total + parseFloat(entry.hours), 0);
+    return result[0]?.total || 0;
   }
 
   async getWeeklyHours(userId: number, startDate: string): Promise<number> {
-    const entries = await this.getTimeEntriesForWeek(userId, startDate);
-    return entries.reduce((total, entry) => total + parseFloat(entry.hours), 0);
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
+    
+    const result = await db
+      .select({ total: sql<number>`SUM(CAST(${timeEntries.hours} AS DECIMAL))` })
+      .from(timeEntries)
+      .where(and(
+        eq(timeEntries.userId, userId),
+        gte(timeEntries.date, startDate),
+        lte(timeEntries.date, endDate.toISOString().split('T')[0])
+      ));
+    
+    return result[0]?.total || 0;
   }
 
   async getTeamHours(managerId: number, startDate: string): Promise<number> {
-    const projects = await this.getProjectsForManager(managerId);
-    const projectIds = projects.map(p => p.id);
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
     
-    const start = new Date(startDate);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
+    const result = await db
+      .select({ total: sql<number>`SUM(CAST(${timeEntries.hours} AS DECIMAL))` })
+      .from(timeEntries)
+      .innerJoin(projects, eq(timeEntries.projectId, projects.id))
+      .where(and(
+        eq(projects.managerId, managerId),
+        gte(timeEntries.date, startDate),
+        lte(timeEntries.date, endDate.toISOString().split('T')[0])
+      ));
     
-    const entries = Array.from(this.timeEntries.values())
-      .filter(entry => {
-        if (!projectIds.includes(entry.projectId)) return false;
-        const entryDate = new Date(entry.date);
-        return entryDate >= start && entryDate <= end;
-      });
-    
-    return entries.reduce((total, entry) => total + parseFloat(entry.hours), 0);
+    return result[0]?.total || 0;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

@@ -6,6 +6,8 @@ import { z } from "zod";
 import ExcelJS from "exceljs";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Initialize database with sample data
+  await storage.initializeDatabase();
   // User routes
   app.get("/api/users", async (req, res) => {
     try {
