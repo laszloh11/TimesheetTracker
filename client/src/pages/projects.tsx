@@ -234,7 +234,7 @@ export default function Projects() {
                     className="rounded border-gray-300"
                   />
                   <Label htmlFor="isPriority" className="text-sm">
-                    Priority Project (allows > 8 hours/day)
+                    Priority Project (allows {'>'} 8 hours/day)
                   </Label>
                 </div>
 
