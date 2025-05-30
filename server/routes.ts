@@ -252,6 +252,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Project assignment routes
+  app.get("/api/project-assignments", async (req, res) => {
+    try {
+      const { projectId, userId } = req.query;
+      
+      let assignments;
+      if (projectId) {
+        assignments = await storage.getProjectAssignments(parseInt(projectId as string));
+        // Include user details
+        const assignmentsWithUsers = await Promise.all(
+          assignments.map(async (assignment) => {
+            const user = await storage.getUser(assignment.userId);
+            return { ...assignment, user };
+          })
+        );
+        assignments = assignmentsWithUsers;
+      } else if (userId) {
+        assignments = await storage.getUserProjectAssignments(parseInt(userId as string));
+      } else {
+        return res.status(400).json({ message: "projectId or userId parameter required" });
+      }
+      
+      res.json(assignments);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch project assignments" });
+    }
+  });
+
   app.post("/api/project-assignments", async (req, res) => {
     try {
       const { userId, projectId } = req.body;

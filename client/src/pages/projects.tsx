@@ -12,12 +12,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Briefcase, Plus, Download, Edit, Users } from "lucide-react";
+import { Briefcase, Plus, Download, Edit, Users, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { z } from "zod";
+import type { Project, User } from "@shared/schema";
 
 type ProjectFormData = z.infer<typeof insertProjectSchema>;
 
@@ -26,6 +27,9 @@ export default function Projects() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isMembersDialogOpen, setIsMembersDialogOpen] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
   const form = useForm<ProjectFormData>({
     resolver: zodResolver(insertProjectSchema),
@@ -40,6 +44,10 @@ export default function Projects() {
     },
   });
 
+  const editForm = useForm<ProjectFormData>({
+    resolver: zodResolver(insertProjectSchema),
+  });
+
   const { data: projects, isLoading } = useQuery({
     queryKey: ["/api/projects", 
       currentRole === "employee" ? { userId: currentUser?.id } :
@@ -51,6 +59,18 @@ export default function Projects() {
       currentRole === "manager" ? api.getProjects({ managerId: currentUser?.id }) :
       api.getProjects(),
     enabled: !!currentUser,
+  });
+
+  const { data: allUsers } = useQuery({
+    queryKey: ["/api/users"],
+    queryFn: () => api.getUsers(),
+    enabled: currentRole === "admin" || currentRole === "manager",
+  });
+
+  const { data: projectAssignments } = useQuery({
+    queryKey: ["/api/project-assignments", selectedProject?.id],
+    queryFn: () => fetch(`/api/project-assignments?projectId=${selectedProject?.id}`).then(res => res.json()),
+    enabled: !!selectedProject && isMembersDialogOpen,
   });
 
   const createProjectMutation = useMutation({
@@ -73,8 +93,103 @@ export default function Projects() {
     },
   });
 
+  const updateProjectMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => api.updateProject(id, data),
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Project updated successfully!",
+      });
+      setIsEditDialogOpen(false);
+      setSelectedProject(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update project",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const assignUserMutation = useMutation({
+    mutationFn: ({ userId, projectId }: { userId: number; projectId: number }) => 
+      api.assignUserToProject(userId, projectId),
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "User assigned to project successfully!",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/project-assignments"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign user",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const removeUserMutation = useMutation({
+    mutationFn: ({ userId, projectId }: { userId: number; projectId: number }) => 
+      api.removeUserFromProject(userId, projectId),
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "User removed from project successfully!",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/project-assignments"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to remove user",
+        variant: "destructive",
+      });
+    },
+  });
+
   const onSubmit = (data: ProjectFormData) => {
     createProjectMutation.mutate(data);
+  };
+
+  const onEditSubmit = (data: ProjectFormData) => {
+    if (selectedProject) {
+      updateProjectMutation.mutate({ id: selectedProject.id, data });
+    }
+  };
+
+  const handleEditProject = (project: Project) => {
+    setSelectedProject(project);
+    editForm.reset({
+      name: project.name,
+      description: project.description || "",
+      startDate: project.startDate,
+      endDate: project.endDate,
+      status: project.status as any,
+      isPriority: project.isPriority,
+      managerId: project.managerId || currentUser?.id,
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleManageMembers = (project: Project) => {
+    setSelectedProject(project);
+    setIsMembersDialogOpen(true);
+  };
+
+  const handleAssignUser = (userId: number) => {
+    if (selectedProject) {
+      assignUserMutation.mutate({ userId, projectId: selectedProject.id });
+    }
+  };
+
+  const handleRemoveUser = (userId: number) => {
+    if (selectedProject) {
+      removeUserMutation.mutate({ userId, projectId: selectedProject.id });
+    }
   };
 
   const handleDownloadReport = async (projectId: number) => {
@@ -332,14 +447,16 @@ export default function Projects() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => handleEditProject(project)}
+                              className="text-primary hover:text-blue-700"
                             >
                               <Edit className="w-4 h-4" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => handleManageMembers(project)}
+                              className="text-green-600 hover:text-green-700"
                             >
                               <Users className="w-4 h-4" />
                             </Button>
