@@ -275,6 +275,9 @@ export default function Projects() {
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
                 <DialogTitle>Create New Project</DialogTitle>
+                <DialogDescription>
+                  Create a new project for time tracking and management.
+                </DialogDescription>
               </DialogHeader>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <div>
@@ -471,6 +474,189 @@ export default function Projects() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit Project Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Project</DialogTitle>
+            <DialogDescription>
+              Update project details and settings.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+            <div>
+              <Label htmlFor="edit-name">Project Name</Label>
+              <Input
+                id="edit-name"
+                {...editForm.register("name")}
+                placeholder="Enter project name"
+              />
+              {editForm.formState.errors.name && (
+                <p className="text-sm text-destructive mt-1">{editForm.formState.errors.name.message}</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                {...editForm.register("description")}
+                placeholder="Enter project description"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit-startDate">Start Date</Label>
+                <Input
+                  id="edit-startDate"
+                  type="date"
+                  {...editForm.register("startDate")}
+                />
+                {editForm.formState.errors.startDate && (
+                  <p className="text-sm text-destructive mt-1">{editForm.formState.errors.startDate.message}</p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="edit-endDate">End Date</Label>
+                <Input
+                  id="edit-endDate"
+                  type="date"
+                  {...editForm.register("endDate")}
+                />
+                {editForm.formState.errors.endDate && (
+                  <p className="text-sm text-destructive mt-1">{editForm.formState.errors.endDate.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="edit-status">Status</Label>
+              <Select
+                value={editForm.watch("status")}
+                onValueChange={(value) => editForm.setValue("status", value as any)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="edit-isPriority"
+                {...editForm.register("isPriority")}
+                className="rounded border-gray-300"
+              />
+              <Label htmlFor="edit-isPriority" className="text-sm">
+                Priority Project (allows {'>'} 8 hours/day)
+              </Label>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={updateProjectMutation.isPending}
+                className="bg-primary text-white hover:bg-blue-700"
+              >
+                {updateProjectMutation.isPending ? "Updating..." : "Update Project"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Members Dialog */}
+      <Dialog open={isMembersDialogOpen} onOpenChange={setIsMembersDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Manage Project Members</DialogTitle>
+            <DialogDescription>
+              Add or remove team members from {selectedProject?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Current Members */}
+            <div>
+              <h3 className="text-lg font-medium mb-3">Current Members</h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {projectAssignments?.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No members assigned to this project.</p>
+                ) : (
+                  projectAssignments?.map((assignment: any) => (
+                    <div key={assignment.id} className="flex items-center justify-between p-2 border rounded">
+                      <div>
+                        <span className="font-medium">{assignment.user?.name}</span>
+                        <span className="text-sm text-muted-foreground ml-2">({assignment.user?.role})</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveUser(assignment.userId)}
+                        disabled={removeUserMutation.isPending}
+                        className="text-destructive hover:text-red-700"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Add Members */}
+            <div>
+              <h3 className="text-lg font-medium mb-3">Add Members</h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {allUsers?.filter((user: User) => 
+                  !projectAssignments?.some((assignment: any) => assignment.userId === user.id)
+                ).map((user: User) => (
+                  <div key={user.id} className="flex items-center justify-between p-2 border rounded">
+                    <div>
+                      <span className="font-medium">{user.name}</span>
+                      <span className="text-sm text-muted-foreground ml-2">({user.role})</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleAssignUser(user.id)}
+                      disabled={assignUserMutation.isPending}
+                      className="text-primary hover:text-blue-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsMembersDialogOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
