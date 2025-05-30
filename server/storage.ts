@@ -349,7 +349,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTimeEntry(id: number): Promise<boolean> {
     const result = await db.delete(timeEntries).where(eq(timeEntries.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async assignUserToProject(assignment: InsertProjectAssignment): Promise<ProjectAssignment> {
